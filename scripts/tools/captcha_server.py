@@ -128,7 +128,10 @@ def locate_modal(img):
             end = x - 1
             width = end - start
             center_x = (start + end) / 2
-            if 260 < width < min(760, w * 0.92) and center_x > w * 0.18:
+            # Wide browser windows can place the Tencent captcha modal far to
+            # the left of the viewport. Keep the size/frequency filters, but
+            # do not require the modal candidate to be near the window center.
+            if 260 < width < min(760, w * 0.92) and center_x > w * 0.05:
                 candidates.append((start, end, y))
 
     for y in range(int(h * 0.10), int(h * 0.92), 6):
