@@ -22,6 +22,21 @@
   - 端口占用**中文提示**（含 PID/进程名/命令行），杀进程前需用户确认
   - 启动命令：双击 `start-backend-pipeline.cmd` 或 `pwsh start-backend-pipeline.ps1`
 - 修复 `start-backend-pipeline.ps1` 在 Windows PowerShell 5.1 中文系统下的 ParserError（缺少 UTF-8 BOM），加 EF BB BF 前缀即可
+- 新增 Pipeline GUI 启动器 `start-backend-pipeline-gui.cmd`
+  - `backend/gui.py` Tk 窗口，弹窗实时显示系统状态、worker 就绪、最近 20 条识别结果、后端 stdout 日志
+  - GUI 拉起 `backend.server` 子进程并接管 stdout，关闭窗口时自动 terminate 后端
+  - 后端新增 `GET /recent?limit=20` 端口返回最近 N 条识别结果（prompt / pred_text / confidence / yolo_ms / ocr_ms / req_id）
+  - `/health` 同步返回 `n_yolo` / `n_ocr` / `port` 字段，GUI 可显示流水线拓扑
+  - 启动：`start-backend-pipeline-gui.cmd`（含 UTF-8 BOM，PS 5.1 兼容）
+- 精简根目录启动器：删除 `start-backend.cmd` / `start-backend-pipeline.cmd` / `install-env.cmd` / `启动后端.cmd` / `首次安装环境.cmd`，只保留 2 个 .cmd
+  - `one-click-start.cmd` — 首次安装环境
+  - `start-backend-pipeline-gui.cmd` — 日常启动 + 弹 GUI 窗口
+- 发布用户脚本 v8.21：高级模式（默认关闭）+ 经典模式自带 ±20% 抖动
+  - 经典模式（v8.20 行为 + 抖动）：验证码点字间隔 220ms±20%、限流重试间隔 80ms±20%（实际 tick 80ms → 64-96ms）
+  - 高级模式开启后露出 2 个数字输入框：**验证码点击间隔**（默认 220ms）和**限流重试间隔**（默认 1000ms）
+  - 所有延迟都自动加 ±20% 随机抖动，经典和高级都有，避免 RPM 风控识别
+  - 限流重试时新引入 `WAITING_RL` 中间态，避免等待期间空跑导致重复点
+- v8.21.1：黄金时间（9:30-11:00）首次进入时弹紫色条提示用户**试试无痕窗口**（`Ctrl+Shift+N`），消除隐形风控标记。`sessionStorage` 去重，同一标签页每天只弹一次。
 
 ## 2026-06-06
 
