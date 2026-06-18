@@ -99,9 +99,14 @@ $OnlineGuide = @"
 GLM Coding Helper online installer package
 
 Recommended:
-1. Install or update Tampermonkey script from glm-coding-helper.user.js.
-2. Double-click one-click-start.cmd.
-3. It will install CPU/GPU backend dependencies automatically when missing, then start the backend.
+1. Extract this package to a short path, for example C:\glm-coding-helper.
+2. Install or update Tampermonkey script from glm-coding-helper.user.js.
+3. Double-click one-click-start.cmd.
+4. It will install CPU/GPU backend dependencies automatically when missing, then start the backend.
+
+Important:
+- Avoid very deep extract paths. Some backend dependencies contain long internal paths.
+- If pip reports "No such file or directory" during install, move the folder to a short path like C:\glm-coding-helper and retry.
 
 Manual:
 - one-click-start.cmd installs the CPU backend environment on first run.

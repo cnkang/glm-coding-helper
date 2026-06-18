@@ -69,7 +69,13 @@ https://github.com/OLmatter/glm-coding-helper/releases
 D:\Tools\glm-coding-helper
 ```
 
-路径里有中文通常也可以。如果遇到环境安装失败，优先换到纯英文路径再试。
+建议解压到短路径，例如：
+
+```text
+C:\glm-coding-helper
+```
+
+不要解压到层级很深的目录。部分依赖包内部路径很长，在 Windows 上可能触发路径长度限制，表现为 `pip install` 时报 `No such file or directory`。如果遇到环境安装失败，优先换到短路径、纯英文路径再试。
 
 ### 3. 安装油猴脚本
 

@@ -12,6 +12,17 @@ Set-Location $Root
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
 
+function Warn-LongInstallPath {
+    # Some backend deps contain very deep package paths. A long extract path can hit
+    # Windows MAX_PATH during pip install even when all release files are present.
+    if ($Root.Length -gt 70) {
+        Write-Host "[WARN] The current folder path is quite long:" -ForegroundColor Yellow
+        Write-Host "       $Root" -ForegroundColor Yellow
+        Write-Host "       If pip reports 'No such file or directory', move this folder to a short path like C:\glm-coding-helper and retry." -ForegroundColor Yellow
+        Write-Host ""
+    }
+}
+
 function Assert-RequiredFiles {
     $required = @(
         "scripts\bootstrap_windows.ps1",
@@ -77,6 +88,7 @@ function Invoke-Bootstrap {
 }
 
 Assert-RequiredFiles
+Warn-LongInstallPath
 
 $InstallTarget = $Target
 if ($InstallTarget -eq "auto") {
@@ -110,6 +122,7 @@ if (-not $Ready) {
             Write-Host "       Auto mode already attempted GPU/CPU fallback." -ForegroundColor Red
         }
         Write-Host "       Try re-extracting the latest release and rerun one-click-start.cmd." -ForegroundColor Red
+        Write-Host "       If the folder path is deep, move it to C:\glm-coding-helper and retry." -ForegroundColor Red
         Read-Host "Press Enter to exit"
         exit 1
     }
