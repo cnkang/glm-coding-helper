@@ -33,6 +33,7 @@ POLL_HEALTH_MS = 1000
 POLL_RECENT_MS = 500
 MAX_LOG_LINES = 500
 MAX_RECENT_SHOWN = 20
+BACKEND_SHUTDOWN_TIMEOUT = 30
 
 # 颜色
 BG = "#f0f2f5"
@@ -304,7 +305,9 @@ class App:
             try:
                 proc.terminate()
                 try:
-                    proc.wait(timeout=3)
+                    # 后端会依次正常停止 YOLO 和 OCR worker；给它足够时间
+                    # 避免父进程过早退出，再次强制终止 Paddle 子进程。
+                    proc.wait(timeout=BACKEND_SHUTDOWN_TIMEOUT)
                 except subprocess.TimeoutExpired:
                     proc.kill()
             except Exception:
