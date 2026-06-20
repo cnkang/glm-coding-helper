@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         智谱 GLM Coding Plan 抢购助手 + 本地 OCR 自动验证码
 // @namespace    http://tampermonkey.net/
-// @version      22.9
+// @version      23.0
 // @description  GLM Coding Rush / 智谱 GLM Coding Plan 抢购助手，一键抢购油猴脚本 / Tampermonkey userscript，配合本地 CPU/GPU OCR 自动识别中文点选验证码并点击，支持多窗口并发、限流重试和支付页安全保护
 // @author       mumumi
 // @include      https://*bigmodel.cn/glm-coding*
@@ -32,6 +32,8 @@
 // ==/UserScript==
 (function () {
     'use strict';
+    const SCRIPT_VERSION = '23.0';
+    const BOOT_BAR_ID = 'glm-helper-status-bar';
     const __glmHost = (() => { try { return location.hostname || ''; } catch { return ''; } })();
     const __inMiniMax = __glmHost === 'platform.minimaxi.com';
     if (__inMiniMax) {
@@ -267,8 +269,85 @@
         setInterval(tick, 1200);
     }
     // ── 去重保护：防止篡猴里装了改名导致的两个实例同时运行 ──────────────────
-    if (document.documentElement.dataset.glmHelper === '1') { return; }
+    function ensureStatusBarNode() {
+        let bar = document.getElementById(BOOT_BAR_ID);
+        if (bar) return bar;
+        const parent = document.body || document.documentElement;
+        if (!parent) return null;
+        bar = document.createElement('div');
+        bar.id = BOOT_BAR_ID;
+        bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;padding:7px 16px;font:13px/1.5 system-ui,sans-serif;color:#fff;display:flex;align-items:center;justify-content:space-between;box-shadow:0 -2px 8px rgba(0,0,0,.25);transition:background .4s';
+        const text = document.createElement('span');
+        const x = document.createElement('button');
+        x.textContent = '×';
+        x.style.cssText = 'background:rgba(255,255,255,.2);border:none;color:#fff;width:22px;height:22px;border-radius:4px;cursor:pointer;font-size:16px;line-height:1;flex-shrink:0';
+        x.onclick = () => { bar.remove(); };
+        bar.append(text, x);
+        parent.appendChild(bar);
+        return bar;
+    }
+    function setBootBar(html, bg = '#1677ff') {
+        const run = () => {
+            const bar = ensureStatusBarNode();
+            if (!bar) return;
+            bar.style.background = bg;
+            bar.firstElementChild.innerHTML = `🤖 <b>抢购助手 v${SCRIPT_VERSION}</b> &nbsp;|&nbsp; ${html}`;
+        };
+        if (document.body || document.documentElement) run();
+        else document.addEventListener('DOMContentLoaded', run, { once: true });
+    }
+    function requestBackendHealth(timeoutMs = 2500) {
+        return new Promise((resolve, reject) => {
+            const url = 'http://127.0.0.1:8888/health?from=glm_helper_' + Date.now();
+            let done = false;
+            const timer = setTimeout(() => {
+                if (done) return;
+                done = true;
+                reject(new Error('timeout'));
+            }, timeoutMs);
+            function finish(ok, value) {
+                if (done) return;
+                done = true;
+                clearTimeout(timer);
+                ok ? resolve(value) : reject(value);
+            }
+            if (typeof GM_xmlhttpRequest === 'function') {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url,
+                    timeout: timeoutMs,
+                    onload: (res) => {
+                        try { finish(true, JSON.parse(res.responseText || '{}')); }
+                        catch (e) { finish(false, e); }
+                    },
+                    onerror: () => finish(false, new Error('request failed')),
+                    ontimeout: () => finish(false, new Error('timeout')),
+                });
+                return;
+            }
+            fetch(url, { cache: 'no-store' })
+                .then(r => r.json())
+                .then(data => finish(true, data))
+                .catch(e => finish(false, e));
+        });
+    }
+    function bootBackendProbe() {
+        setBootBar('准备中：默认不主动点击订阅；按 <b>F9</b> 开启自动点击，或等待 Rush 目标时间。正在检查本地 OCR 后端...', '#1677ff');
+        requestBackendHealth().then((h) => {
+            const ready = `${h.ready_workers ?? '?'} / ${h.workers ?? '?'}`;
+            const status = h.status || 'unknown';
+            const color = status === 'ok' ? '#237804' : '#d46b08';
+            setBootBar(`已连接本地 OCR 后端：${status}，worker ${ready}，端口 ${h.port || 8888}。默认不自动点击订阅；按 <b>F9</b> 开启，按 <b>F8</b> 暂停。`, color);
+        }).catch(() => {
+            setBootBar('未连接本地 OCR 后端：请先启动后端 127.0.0.1:8888。脚本仍会准备页面，但验证码识别不可用；默认不自动点击订阅，按 <b>F9</b> 可手动开启。', '#d46b08');
+        });
+    }
+    if (document.documentElement.dataset.glmHelper === '1') {
+        setBootBar('检测到页面上已有一个抢购助手实例，本实例未重复启动。若没有状态提示，请在篡改猴里只保留最新版脚本。', '#d46b08');
+        return;
+    }
     document.documentElement.dataset.glmHelper = '1';
+    bootBackendProbe();
     // ── 最早读配置（document-start 时还没有主流程）──────────────────────────
     const EARLY_STORAGE_KEY = 'glm_coding_config_v5';
     const SAFE_DEFAULTS_VERSION = 4;
@@ -925,14 +1004,8 @@
     var _bar = null;
     function setBar(html, bg = '#1677ff') {
         if (!_bar) {
-            _bar = document.createElement('div');
-            _bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;padding:7px 16px;font:13px/1.5 system-ui,sans-serif;color:#fff;display:flex;align-items:center;justify-content:space-between;box-shadow:0 -2px 8px rgba(0,0,0,.25);transition:background .4s';
-            const x = document.createElement('button');
-            x.textContent = '×';
-            x.style.cssText = 'background:rgba(255,255,255,.2);border:none;color:#fff;width:22px;height:22px;border-radius:4px;cursor:pointer;font-size:16px;line-height:1;flex-shrink:0';
-            x.onclick = () => { _bar.remove(); _bar = null; };
-            _bar.append(document.createElement('span'), x);
-            document.body.appendChild(_bar);
+            _bar = ensureStatusBarNode();
+            if (!_bar) return;
         }
         _bar.style.background = bg;
         _bar.firstElementChild.innerHTML = `🤖 <b>抢购助手</b> &nbsp;|&nbsp; ${html}`;
