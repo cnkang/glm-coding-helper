@@ -60,7 +60,8 @@ else:
     _cfg = {}
 N_YOLO = max(1, int(_cfg.get("workers", _DEFAULT["workers"])))
 N_OCR  = max(1, int(_cfg.get("ocr_workers", _DEFAULT["ocr_workers"])))
-PORT   = max(1, int(_cfg.get("port", _DEFAULT["port"])))
+HOST   = os.environ.get("CNCAPTCHA_HOST", "0.0.0.0")
+PORT   = max(1, int(os.environ.get("CNCAPTCHA_PORT", _cfg.get("port", _DEFAULT["port"]))))
 
 if not CONFIG_PATH.exists():
     try:
@@ -426,7 +427,7 @@ async def handle_batch_direct(data: BatchCaptchaRequest):
 
 def main():
     mp.freeze_support()
-    uvicorn.run("backend.server:app", host="0.0.0.0", port=PORT, log_level="info")
+    uvicorn.run("backend.server:app", host=HOST, port=PORT, log_level="info")
 
 
 if __name__ == "__main__":
