@@ -50,15 +50,17 @@ function New-Zip {
         & $sevenZipA.Source a -tzip $ZipPath $PackageDir | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "7za failed with exit code $LASTEXITCODE" }
     } else {
-        $parent = Split-Path -Parent $PackageDir
-        $leaf = Split-Path -Leaf $PackageDir
-        Push-Location $parent
-        try {
-            tar -a -cf (Split-Path -Leaf $ZipPath) $leaf
-            if ($LASTEXITCODE -ne 0) { throw "tar zip failed with exit code $LASTEXITCODE" }
-        } finally {
-            Pop-Location
-        }
+        # 用 Python zipfile 打包（最可靠，无 Windows MAX_PATH 限制）
+        # Compress-Archive 对长路径/中文路径易失败，Windows bsdtar 的 -a 对 .zip 扩展名识别有 bug
+        $py = Get-Command python -ErrorAction SilentlyContinue
+        if (-not $py) { $py = Get-Command python3 -ErrorAction SilentlyContinue }
+        if (-not $py) { throw "Neither 7z nor python found; cannot create zip" }
+        $env:_ZIP_OUT = $ZipPath
+        $env:_ZIP_SRC = $PackageDir
+        python -c "import os,zipfile;zo=os.environ['_ZIP_OUT'];zs=os.environ['_ZIP_SRC'];z=zipfile.ZipFile(zo,'w',zipfile.ZIP_DEFLATED);import os;[z.write(os.path.join(r,f),os.path.relpath(os.path.join(r,f),zs)) for r,_,fs in os.walk(zs) for f in fs];z.close()"
+        if ($LASTEXITCODE -ne 0) { throw "python zipfile failed with exit code $LASTEXITCODE" }
+        if (-not (Test-Path $ZipPath)) { throw "python failed to create $ZipPath" }
+        Remove-Item Env:_ZIP_OUT, Env:_ZIP_SRC -ErrorAction SilentlyContinue
     }
     $zipSize = (Get-Item $ZipPath).Length
     Write-Host ("Created {0} ({1:N1} MB)" -f $ZipPath, ($zipSize / 1MB))
