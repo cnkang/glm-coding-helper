@@ -254,7 +254,6 @@ Linux 首次安装与日常启动均使用 `./one-click-start.sh`（`start_backe
 | --- | --- |
 | `glm-coding-helper.user.js` | 给 Tampermonkey 安装的主脚本 |
 | `one-click-start.cmd` | 首次安装 CPU/GPU 环境 + 启动后端 + Tk GUI（Windows 主入口） |
-| `start-backend-pipeline-gui.cmd` | 可选：启动 backend/ FastAPI 多进程流水线 + Tk 窗口 |
 | `one-click-start.command` | macOS 首次安装 CPU 环境并启动后端 |
 | `start-backend-pipeline-gui.command` | macOS 日常启动后端 + Tk 窗口 |
 | `one-click-start.sh` | Linux 首次安装 CPU/GPU 环境并启动 headless 后端 |
