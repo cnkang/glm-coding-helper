@@ -1312,8 +1312,10 @@
     }
     function onSweepDone() {
         if (sweepBusyCount >= scanQueue.length) {
-            setBar('⚠️ 所有套餐当前都在系统繁忙，刷新页面重试...', '#d46b08');
-            setTimeout(() => location.replace(GLM_CODING_URL()), 1500);
+            // 所有套餐都显示"抢购人数过多/请刷新"——不自动刷新（自动刷新太激进会触发更严重风控），
+            // 停下来让用户手动刷新页面，直到看到"特惠订阅"按钮再继续。
+            state = 'DONE';
+            setBar('🛑 所有套餐显示「抢购人数过多，请刷新再试」。请手动刷新页面（F5），直到看到「特惠订阅」按钮。自动刷新容易触发更严重风控。', '#ff4d4f');
             return;
         }
         if (!sweepRestocks.length) {
