@@ -127,7 +127,8 @@ if (-not $NoZip) {
         if (-not $py) { throw "Neither 7z nor python found; cannot create zip" }
         $env:_ZIP_OUT = $ZipPath
         $env:_ZIP_SRC = $PackageDir
-        python -c "import os,zipfile;zo=os.environ['_ZIP_OUT'];zs=os.environ['_ZIP_SRC'];z=zipfile.ZipFile(zo,'w',zipfile.ZIP_DEFLATED);import os;[z.write(os.path.join(r,f),os.path.relpath(os.path.join(r,f),zs)) for r,_,fs in os.walk(zs) for f in fs];z.close()"
+        # 打包时强制 .sh/.command 为 LF 行尾（避免 macOS/Linux /bin/bash^M）
+        python -c "import os,zipfile;zo=os.environ['_ZIP_OUT'];zs=os.environ['_ZIP_SRC'];z=zipfile.ZipFile(zo,'w',zipfile.ZIP_DEFLATED);[z.writestr(os.path.relpath(os.path.join(r,f),zs), open(os.path.join(r,f),'rb').read().replace(b'\r\n',b'\n')) if f.lower().endswith(('.sh','.command')) else z.write(os.path.join(r,f),os.path.relpath(os.path.join(r,f),zs)) for r,_,fs in os.walk(zs) for f in fs];z.close()"
         if ($LASTEXITCODE -ne 0) { throw "python zipfile failed with exit code $LASTEXITCODE" }
         if (-not (Test-Path $ZipPath)) { throw "python failed to create $ZipPath" }
         Remove-Item Env:_ZIP_OUT, Env:_ZIP_SRC -ErrorAction SilentlyContinue
