@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         智谱 GLM Coding Plan 抢购助手 + 本地 OCR 自动验证码
 // @namespace    http://tampermonkey.net/
-// @version      23.7
+// @version      23.8
 // @description  GLM Coding Rush / 智谱 GLM Coding Plan 抢购助手，一键抢购油猴脚本 / Tampermonkey userscript，配合本地 CPU/GPU OCR（PP-OCRv6）自动识别中文点选验证码并点击，支持多窗口并发、限流重试和支付页安全保护。订阅入口被风控拦截时手动点「特惠订阅」即可，验证码自动打。
 // @author       mumumi
 // @include      https://*bigmodel.cn/glm-coding*
@@ -109,6 +109,9 @@
                 const cleaned = raw
                     .replace(/^\s*\u8BF7\u4F9D\u6B21\u70B9\u51FB[:\uff1a]?\s*/, '')
                     .replace(/\s+/g, '');
+                // 排除说明性文字（"验证码""安全验证"等），它们也会被当成目标字
+                // 传给后端导致 detected 0 boxes。
+                if (/\u9A8C\u8BC1\u7801|\u5B89\u5168\u9A8C\u8BC1|\u70B9\u51FB\u56FE\u4E2D|\u70B9\u51FB\u8FDB\u884C|\u56FE\u5F62\u9A8C\u8BC1|\u8BF7\u70B9\u51FB|\u5B8C\u6210\u9A8C\u8BC1|\u8FDB\u884C\u9A8C\u8BC1/.test(cleaned)) continue;
                 const chars = (cleaned.match(/[\u4e00-\u9fff]/g) || []).slice(-3);
                 if (chars.length >= 3) return chars.join('');
             }
@@ -1948,6 +1951,10 @@
         if (!text) return false;
         if (/(\u62D6\u52A8|\u62FC\u56FE|\u6ED1\u5757)/.test(text)) return false;
         if (/^\u8BF7\u4F9D\u6B21\u70B9\u51FB/.test(text)) return true;
+        // 排除说明性/标题性文字（"验证码""安全验证""请点击图中文字"等），
+        // 它们也是 3-8 个汉字，会被下面的兜底分支误判为目标字，导致后端
+        // 在点选图里找不到这些"字" → detected 0 boxes。
+        if (/\u9A8C\u8BC1\u7801|\u9A8C\u8BC1|\u5B89\u5168\u9A8C\u8BC1|\u70B9\u51FB\u8FDB\u884C|\u70B9\u51FB\u56FE\u4E2D|\u56FE\u5F62\u9A8C\u8BC1|\u8BF7\u70B9\u51FB|\u5B8C\u6210\u9A8C\u8BC1|\u8FDB\u884C\u9A8C\u8BC1/.test(text)) return false;
         var chars = (text.match(/[\u4e00-\u9fff]/g) || []);
         return chars.length >= 3 && chars.length <= 8;
     }
@@ -2201,7 +2208,10 @@
             '.tencent-captcha-dy__header-text',
             '.tencent-captcha-dy__header-title-wrap .tencent-captcha-dy__header-text',
             "div[class*='tencent-captcha'] div[class*='header-text']",
-            '[aria-label]',
+            // aria-label 兜底：限定在腾讯验证码容器内，避免抓到页面其它元素（如按钮
+            // aria-label="验证码"、标题等）的说明性文字，导致后端 0 boxes。
+            '.tencent-captcha-dy[aria-label]',
+            '[class*="tencent-captcha-dy__"][aria-label]',
         ];
         for (var i = 0; i < selectors.length; i++) {
             var el = document.querySelector(selectors[i]);

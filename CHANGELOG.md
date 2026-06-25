@@ -2,7 +2,8 @@
 
 ## 2026-06-26
 
-- 修复后端调试图片无限增长占满磁盘的问题：`/captcha_direct` 每次识别都把原图存到 `dataset/debug_captcha_direct/`，加上 `dataset/auto_captured/`（截屏）和 `logs/ppocr_live_crops/`（字裁剪图），三个目录都**没有任何清理**，长时间挂着抢会累积几百上千张。现改为滚动保留最近 N 个（debug 60 / auto_captured 120 / crops 200），每次写入后清理更老的，删除会打日志。这些目录纯属调试用途，对识别功能无影响。
+- 发布用户脚本 v23.8：修复后端日志反复出现 `[captcha] FAIL: detected 0 boxes, need 3` 的问题。根因是 `isPointClickPrompt` 的兜底分支「3-8 个汉字即视为合法点选目标」太宽，把验证码容器的说明性文字（如 aria-label="验证码"、标题「安全验证」「图形验证码」「请点击图中文字」「点击进行验证」等）也判成了目标字，传给后端后 YOLO 在点选图里找不到「验」「证」「码」这些字 → detected 0 boxes，且因每分钟轮询会反复刷屏。修复：① `isPointClickPrompt`/`findPromptText` 加说明性文字黑名单（验证码/安全验证/图形验证/请点击/完成验证/进行验证/点击图中/点击进行）；② 收紧 in-page 的 `[aria-label]` 兜底选择器，限定在腾讯验证码容器内，避免抓到页面其它元素。真目标字（山水木/请依次点击）不受影响。
+- 修复后端调试图片无限增长占满磁盘的问题：`/captcha_direct` 每次识别都把原图存到 `dataset/debug_captcha_direct/`，加上 `dataset/auto_captured/`（截屏）和 `logs/ppocr_live_crops/`（字裁剪图），三个目录都**没有任何清理**，长时间挂着抢会累积几百上千张。现改为两层清理：① **启动时清空**上次的调试图（重启即放弃旧图）；② **运行时滚动**保留最近 N 个（debug 60 / auto_captured 120 / crops 200），连挂几天不重启时兜底。这些目录纯属调试用途，对识别功能无影响。
 - 发布用户脚本 v23.7：修复 rush 模式 10:00 到点不自动点验证码确定的问题。根因是 PR #36 的验证码熔断（防自激振荡）有两个缺陷：① `captchaSession.stopped` 一旦置 true 后全文件无任何重置路径（`resetCaptchaSession`/`noteCaptchaSuccess` 都漏清），用户 10:00 前提前开页面、后端没起好或网络抖动累积 3 次失败后，验证码流程被永久焊死，到点也不再识别 → 自然不点确定；② 失败计数跨所有图累计，但自激振荡只在「同一张图反复开火」时才发生。修复：失败计数绑定到 `bgUrl`（换图即重置 failCount/stopped）；rush 黄金窗口（到点后 `holdWindowMs` 内）失败只冷却不 hard-stop；`resetCaptchaSession` 和 `noteCaptchaSuccess` 补齐清 `stopped`/`failCount`/`failBgUrl`。保留了 PR #36 对「同一张图自激振荡」的熔断保护，只消除误伤 rush 窗口和永久不可逆两个副作用。15 个单元测试覆盖同图熔断/换图重置/rush 窗口不焊死/窗口外熔断可恢复等场景。
 - 合并 PR #37（macOS 启动前校验后端 OCR 环境）：`one-click-start.command` 和 `start-backend-pipeline-gui.command` 启动时改为调用新增的 `scripts/check_backend_env.py`，除了 import 依赖，还会校验 `paddleocr/paddlex>=3.7.0` 版本下限，并验证默认 OCR 模型（`PP-OCRv6_tiny_rec`）在 `default_registry` 已注册，避免「能 import 但模型加载失败」被漏判而启动报错。`setup_backend_macos.sh` 安装末尾追加一次真实 `TextRecognition` 加载验证。
 - 合并 PR #36（首请求冷启动优化 + Chrome LNA 绕过 + 验证码熔断）：
