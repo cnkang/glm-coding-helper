@@ -270,6 +270,27 @@ for raw_line in sys.stdin.buffer:
         confs = [item[1] for item in selected]
 
         if len(boxes) != 3:
+            # 预热兜底：白图/样本图 YOLO 检测不到字时，OCR 子进程不会被调用 →
+            # 没被预热 → 第一个真验证码撞 OCR JIT（实测 5-8s）导致客户端超时丢点。
+            # 这里强制把图横切3块喂给 OCR 跑一次，确保 OCR 子进程完成 JIT 预热。
+            if req.get("force_ocr_warmup"):
+                try:
+                    CROP_DIR.mkdir(parents=True, exist_ok=True)
+                    w3 = image.width // 3
+                    stamp = f"{int(_time.time() * 1000)}"
+                    fake_crops = []
+                    for wi in range(3):
+                        crop = image.crop((wi * w3, 0, (wi + 1) * w3, image.height))
+                        cp = CROP_DIR / f"_warmup_{stamp}_{wi}.png"
+                        crop.save(cp)
+                        fake_crops.append(cp)
+                    _prune_crops()
+                    ask_ocr(fake_crops, chars)
+                    sys.stderr.write("[worker] OCR warmup done (forced on non-3-boxes image)\n")
+                    sys.stderr.flush()
+                except Exception as we:
+                    sys.stderr.write(f"[worker] OCR warmup failed: {we}\n")
+                    sys.stderr.flush()
             write_response({"error": f"detected {len(boxes)} boxes, need 3", "success": False, "reason": reason})
             continue
 

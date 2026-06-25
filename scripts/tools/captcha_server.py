@@ -327,13 +327,14 @@ def _stop_worker_proc():
             pass
     _worker_proc = None
 
-def recognize_captcha(image_path, prompt_chars, crop_rect=None):
+def recognize_captcha(image_path, prompt_chars, crop_rect=None, force_ocr_warmup=False):
     try:
         proc = _get_worker()
         req = json.dumps({
             "image_path": str(image_path),
             "chars": list(prompt_chars),
             "crop_rect": list(crop_rect) if crop_rect else None,
+            "force_ocr_warmup": bool(force_ocr_warmup),
         }, ensure_ascii=False) + "\n"
         print(f"[CAPTURE] sending to worker: {image_path} chars={''.join(prompt_chars)}", flush=True)
         proc.stdin.write(req.encode("utf-8"))
@@ -736,8 +737,8 @@ def run_gui():
                     if not warmup_path.exists():
                         _Img.new("RGB", (672, 480), "white").save(warmup_path)
                 _wt0 = time.perf_counter()
-                _ = recognize_captcha(str(warmup_path), list("测试图"), crop_rect=None)
-                log_to_gui(f"模型预热完成 ({(time.perf_counter()-_wt0)*1000:.0f}ms)")
+                _ = recognize_captcha(str(warmup_path), list("测试图"), crop_rect=None, force_ocr_warmup=True)
+                log_to_gui(f"模型预热完成（yolo+ocr 链路已打热）({(time.perf_counter()-_wt0)*1000:.0f}ms)")
             except Exception as we:
                 log_to_gui(f"预热失败（不影响功能，仅首次会慢）: {we}")
         except Exception as e:
