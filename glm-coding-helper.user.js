@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         智谱 GLM Coding Plan 抢购助手 + 本地 OCR 自动验证码
 // @namespace    http://tampermonkey.net/
-// @version      23.6
+// @version      23.9
 // @description  GLM Coding Rush / 智谱 GLM Coding Plan 抢购助手，一键抢购油猴脚本 / Tampermonkey userscript，配合本地 CPU/GPU OCR（PP-OCRv6）自动识别中文点选验证码并点击，支持多窗口并发、限流重试和支付页安全保护。订阅入口被风控拦截时手动点「特惠订阅」即可，验证码自动打。
 // @author       mumumi
 // @include      https://*bigmodel.cn/glm-coding*
@@ -109,6 +109,9 @@
                 const cleaned = raw
                     .replace(/^\s*\u8BF7\u4F9D\u6B21\u70B9\u51FB[:\uff1a]?\s*/, '')
                     .replace(/\s+/g, '');
+                // 排除说明性文字（"验证码""安全验证"等），它们也会被当成目标字
+                // 传给后端导致 detected 0 boxes。
+                if (/\u9A8C\u8BC1\u7801|\u5B89\u5168\u9A8C\u8BC1|\u70B9\u51FB\u56FE\u4E2D|\u70B9\u51FB\u8FDB\u884C|\u56FE\u5F62\u9A8C\u8BC1|\u8BF7\u70B9\u51FB|\u5B8C\u6210\u9A8C\u8BC1|\u8FDB\u884C\u9A8C\u8BC1/.test(cleaned)) continue;
                 const chars = (cleaned.match(/[\u4e00-\u9fff]/g) || []).slice(-3);
                 if (chars.length >= 3) return chars.join('');
             }
@@ -991,9 +994,13 @@
     }
     // ── v8.9: 弹窗关闭决策（三态返回）────────────────────────────────────────
     // 返回: 'close' → 关弹窗试下一个 | 'keep' → 不关 | 'warn' → 异常，告知用户
+    // 无金额无效页兜底：GLM 有时先显示无金额/没抢到，过 ~1 秒才弹出真金额订单（#16/#40），
+    // 所以无金额不能立刻关，要持续无金额超过 1.7s 才判无效页关闭。
+    let noPriceSince = 0;
+    const NO_PRICE_GRACE_MS = 1700;
     function checkPayDialog() {
         const dlg = getPayDialog();
-        if (!dlg) return 'keep';
+        if (!dlg) { noPriceSince = 0; return 'keep'; }
         if (window.__glmRushConfirmed) {
             window.__glmRushDialogSeen = 1;
             return 'keep';
@@ -1017,7 +1024,21 @@
         }
         // ── 情况 D：接口没说售罄/繁忙，但弹窗里出现小飞机 → 异常不一致
         if (hasAirplaneInDialog()) return 'warn';
-        // ── 情况 C：接口成功 + 有价格 → 不关
+        // ── 情况 C：接口成功/其它 → 看弹窗实际有没有金额
+        const prices = readDialogPrices();
+        if (prices?.any) {
+            // 有有效金额（真支付页），清掉无金额计时，保留弹窗等用户支付。
+            noPriceSince = 0;
+            return 'keep';
+        }
+        // 无金额（疑似无效支付页）。GLM 有时会延迟 ~1s 才渲染出真金额订单，
+        // 不能立刻关——持续无金额超过宽限期才判无效页关闭。
+        if (!noPriceSince) noPriceSince = Date.now();
+        if (Date.now() - noPriceSince >= NO_PRICE_GRACE_MS) {
+            console.log('[GLM v8.9] 无金额持续 ' + (Date.now() - noPriceSince) + 'ms，判定为无效支付页');
+            return 'close';
+        }
+        console.log('[GLM v8.9] 弹窗暂无金额，宽限等待 ' + (Date.now() - noPriceSince) + '/' + NO_PRICE_GRACE_MS + 'ms');
         return 'keep';
     }
     // ── 底部状态栏 ────────────────────────────────────────────────────────────
@@ -1670,11 +1691,19 @@
         // 失败保护：错一次冷却一会、连续错够 N 次直接停手，避免被腾讯 SDK 自我重置
         // 的循环吸进 50ms 一发的自激振荡（一直打同一张图把后端打爆）。
         failCount: 0,
+        failBgUrl: '',
         cooldownUntil: 0,
         stopped: false,
     };
     const CAPTCHA_FAIL_COOLDOWN_MS = 1500;   // 单次失败冷却 1.5 秒
-    const CAPTCHA_FAIL_HARD_LIMIT = 3;       // 连续失败 ≥3 次后彻底停手
+    const CAPTCHA_FAIL_HARD_LIMIT = 3;       // 同一张图连续失败 ≥3 次后彻底停手
+    // rush 黄金窗口：到点后 holdWindowMs 内。窗口期内失败只冷却不 hard-stop，
+    // 保证 10:00 抢购黄金窗口不会被提前累积的失败熔断焊死（导致到点不识别不点确定）。
+    function isRushWindowActive() {
+        if (!RUSH_CFG.enabled) return false;
+        var remaining = getTargetTimestamp() - Date.now();
+        return remaining <= RUSH_CFG.holdWindowMs;
+    }
     function getCaptchaLastText() { return captchaSession.lastText; }
     function setCaptchaLastText(text) { captchaSession.lastText = text || ''; }
     function getCaptchaLastBgUrl() { return captchaSession.lastBgUrl; }
@@ -1685,13 +1714,24 @@
     function setCaptchaState(state) { captchaSession.state = state; }
     function isCaptchaStopped() { return captchaSession.stopped === true; }
     function inCaptchaCooldown() { return Date.now() < captchaSession.cooldownUntil; }
-    function noteCaptchaFailure() {
+    // 失败计数绑定到"同一张图"：换图（腾讯 SDK 重置、换新挑战、rush 窗口新验证码）时重置 failCount，
+    // 避免跨图累积误伤；自激振荡（同一张图反复开火）只在 failBgUrl 不变时才累计。
+    function noteCaptchaFailure(failBgUrl) {
+        if (failBgUrl && captchaSession.failBgUrl && failBgUrl !== captchaSession.failBgUrl) {
+            captchaSession.failCount = 0;
+            captchaSession.stopped = false;
+        }
+        captchaSession.failBgUrl = failBgUrl || '';
         captchaSession.failCount += 1;
         captchaSession.cooldownUntil = Date.now() + CAPTCHA_FAIL_COOLDOWN_MS;
-        if (captchaSession.failCount >= CAPTCHA_FAIL_HARD_LIMIT) {
+        // rush 黄金窗口（到点后 holdWindowMs 内）只冷却不 hard-stop，保证窗口期不会被焊死。
+        if (captchaSession.failCount >= CAPTCHA_FAIL_HARD_LIMIT && !isRushWindowActive()) {
             captchaSession.stopped = true;
-            console.warn('[captcha] 连续失败 ' + captchaSession.failCount + ' 次，自动验证已停止；'
+            console.warn('[captcha] 连续失败 ' + captchaSession.failCount + ' 次（同一图），自动验证已停止；'
                 + '请手动完成本次验证码，然后刷新页面或重新打开抢购弹窗以恢复自动模式。');
+        } else if (captchaSession.failCount >= CAPTCHA_FAIL_HARD_LIMIT) {
+            console.warn('[captcha] 失败 ' + captchaSession.failCount + ' 次，rush 窗口期内仅冷却不熔断；'
+                + '冷却 ' + CAPTCHA_FAIL_COOLDOWN_MS + 'ms 后再试');
         } else {
             console.warn('[captcha] 失败 ' + captchaSession.failCount + '/' + CAPTCHA_FAIL_HARD_LIMIT
                 + '，冷却 ' + CAPTCHA_FAIL_COOLDOWN_MS + 'ms 后再试');
@@ -1700,11 +1740,18 @@
     function noteCaptchaSuccess() {
         captchaSession.failCount = 0;
         captchaSession.cooldownUntil = 0;
+        captchaSession.failBgUrl = '';
+        captchaSession.stopped = false;
     }
     function resetCaptchaSession() {
         setCaptchaSent(false);
         setCaptchaLastText('');
         setCaptchaLastBgUrl('');
+        // 完整重置：清掉熔断状态，否则一旦 hard-stop 过，到点后验证码也再不识别（rush 卡点根因）。
+        captchaSession.failCount = 0;
+        captchaSession.cooldownUntil = 0;
+        captchaSession.failBgUrl = '';
+        captchaSession.stopped = false;
     }
     function serverRequest(method, path, data) {
         function doFetch() {
@@ -1922,6 +1969,10 @@
         if (!text) return false;
         if (/(\u62D6\u52A8|\u62FC\u56FE|\u6ED1\u5757)/.test(text)) return false;
         if (/^\u8BF7\u4F9D\u6B21\u70B9\u51FB/.test(text)) return true;
+        // 排除说明性/标题性文字（"验证码""安全验证""请点击图中文字"等），
+        // 它们也是 3-8 个汉字，会被下面的兜底分支误判为目标字，导致后端
+        // 在点选图里找不到这些"字" → detected 0 boxes。
+        if (/\u9A8C\u8BC1\u7801|\u9A8C\u8BC1|\u5B89\u5168\u9A8C\u8BC1|\u70B9\u51FB\u8FDB\u884C|\u70B9\u51FB\u56FE\u4E2D|\u56FE\u5F62\u9A8C\u8BC1|\u8BF7\u70B9\u51FB|\u5B8C\u6210\u9A8C\u8BC1|\u8FDB\u884C\u9A8C\u8BC1/.test(text)) return false;
         var chars = (text.match(/[\u4e00-\u9fff]/g) || []);
         return chars.length >= 3 && chars.length <= 8;
     }
@@ -2175,7 +2226,10 @@
             '.tencent-captcha-dy__header-text',
             '.tencent-captcha-dy__header-title-wrap .tencent-captcha-dy__header-text',
             "div[class*='tencent-captcha'] div[class*='header-text']",
-            '[aria-label]',
+            // aria-label 兜底：限定在腾讯验证码容器内，避免抓到页面其它元素（如按钮
+            // aria-label="验证码"、标题等）的说明性文字，导致后端 0 boxes。
+            '.tencent-captcha-dy[aria-label]',
+            '[class*="tencent-captcha-dy__"][aria-label]',
         ];
         for (var i = 0; i < selectors.length; i++) {
             var el = document.querySelector(selectors[i]);
@@ -2421,8 +2475,8 @@
             // 注意：这里**不要**调 resetCaptchaSession()。原来的逻辑会立刻把 sent 清成
             // false，下一个 50ms tick 又对同一张图开火，形成自激振荡（被腾讯 SDK 的自我
             // 重置吸进死循环）。改为 noteCaptchaFailure 触发冷却 + 累计计数，连续失败
-            // 够多次后干脆停手等用户介入。
-            noteCaptchaFailure();
+            // 够多次后干脆停手等用户介入。传入 bgUrl 让计数绑定到"同一张图"，换图即重置。
+            noteCaptchaFailure(bgUrl);
         } finally {
             setCaptchaState('idle');
         }
